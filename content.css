@@ -1,0 +1,29 @@
+.gt-translation {
+  display: block;
+  margin: 4px 0 8px;
+  padding: 2px 0 2px 10px;
+  border-left: 3px solid #4285f4;
+  color: #1a73e8;
+  font-size: 0.95em;
+  line-height: 1.6;
+  opacity: 0.96;
+  text-align: left;
+}
+
+.gt-toast {
+  position: fixed;
+  z-index: 2147483647;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  max-width: 80vw;
+  padding: 10px 16px;
+  background: #202124;
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.4;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+}

@@ -1,0 +1,12 @@
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# 千萬不要把含金鑰的檔案傳上去（本專案的 key 存在瀏覽器，不在檔案裡；此處僅為保險）
+*.key
+secrets.*
+.env
