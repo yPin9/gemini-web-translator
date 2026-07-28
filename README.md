@@ -13,12 +13,19 @@
 2. 點 **Create API key**，複製金鑰。
 3. 免費層級即可使用（有每分鐘/每日次數限制）。
 
-## 二、安裝（載入未封裝擴充功能）
+## 二、取得程式碼
+- **用 git**：`git clone https://github.com/yPin9/gemini-web-translator.git`
+- **或**在 GitHub 頁面點 **Code → Download ZIP**，解壓縮。
+- 之後要更新：在資料夾裡執行 `git pull`，再到 `chrome://extensions` 點該擴充功能的 🔄 重新載入。
+
+## 三、安裝（載入未封裝擴充功能）
 1. Chrome 網址列輸入 `chrome://extensions`。
 2. 右上角開啟 **開發人員模式 (Developer mode)**。
-3. 點 **載入未封裝項目 (Load unpacked)**，選擇這個資料夾 `D:\translate_web`。
+3. 點 **載入未封裝項目 (Load unpacked)**，選擇你 clone / 解壓後的資料夾。
 4. 安裝後，點該擴充功能的 **選項 / Options**（或工具列圖示 → 開啟選項設定）。
-5. 貼上 API key → 按「儲存」→「測試連線」確認成功。
+5. 貼上你自己的 API key → 按「儲存」→「測試連線」確認成功。
+
+> 在**多台電腦**用：每台都 clone/下載 → 載入未封裝 → 各自填一次自己的 API key（key 存在該台瀏覽器，不會上傳、也不會跟著 repo 走）。
 
 ## 三、使用
 - 打開任一網頁 → 點工具列圖示 → **翻譯此頁**，或直接按 **Alt+T**。
