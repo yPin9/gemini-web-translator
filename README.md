@@ -14,11 +14,11 @@ Gemini Web Translator 是一個 Chrome 擴充功能。它會找出網頁中的�
 
 <p align="center">
   <a href="assets/gemini-web-translator-demo.mp4">
-    <img src="assets/gemini-web-translator-demo.png" alt="Gemini Web Translator demo" width="900">
+    <img src="assets/gemini-web-translator-demo.gif" alt="Gemini Web Translator demo" width="900">
   </a>
 </p>
 
-<p align="center"><sub>點擊圖片觀看 Demo</sub></p>
+<p align="center"><sub>點擊 Demo 下載高畫質 MP4</sub></p>
 
 ## Features
 
