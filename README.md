@@ -5,7 +5,7 @@
 <h1 align="center">Gemini Web Translator</h1>
 
 <p align="center">
-  <b>保留原文，在每個段落下方加上自然的臺灣繁體中文翻譯。</b>
+  <b>保留原文，在每個段落下方加上自然的臺灣繁體中文翻譯</b>
 </p>
 
 Gemini Web Translator 是一個 Chrome 擴充功能。它會找出網頁中的標題、段落和列表，將內容分批交給 Gemini，再把譯文放回原文下方。原始內容不會被覆蓋，再次切換即可還原頁面。
@@ -30,14 +30,27 @@ cd gemini-web-translator
 
 安裝或重新載入擴充功能後，原本已經開啟的分頁需要重新整理一次。
 
+## API key
+
+每位使用者都需要設定自己的 Gemini API key：
+
+1. 前往 [Google AI Studio API Keys](https://aistudio.google.com/apikey)。
+2. 登入 Google 帳號，建立並複製 API key。
+3. 點擊 Chrome 工具列上的 Gemini Web Translator icon。
+4. 選擇「開啟選項設定」。
+5. 將 key 貼到「Gemini API Key」欄位。
+6. 按「儲存」，再按「測試連線」。
+
+也可以從 `chrome://extensions` 找到 Gemini Web Translator，進入「詳細資料」後選擇「擴充功能選項」。
+
+API key 會儲存在目前瀏覽器的 `chrome.storage.local`。它不會跟著專案或 Git 上傳，所以每台電腦、每個 Chrome 使用者設定檔都需要分別設定。
+
 ## Quick start
 
-1. 前往 [Google AI Studio](https://aistudio.google.com/apikey) 建立自己的 Gemini API key。
-2. 開啟擴充功能的「選項」頁面，貼上 key 並按「儲存」。
-3. 如果有專有名詞或固定譯法，在同一頁的「術語表」欄位加入規則。
-4. 按「測試連線」確認設定正確。
-5. 打開要閱讀的網頁，按 **Alt+T**，或從工具列選擇「翻譯此頁」。
-6. 再按一次 **Alt+T**，或選擇「還原原文」，即可移除譯文。
+1. 先完成 API key 設定並確認測試連線成功。
+2. 如果有專有名詞或固定譯法，在同一頁的「術語表」欄位加入規則並儲存。
+3. 打開要閱讀的網頁，按 **Alt+T**，或從工具列選擇「翻譯此頁」。
+4. 再按一次 **Alt+T**，或選擇「還原原文」，即可移除譯文。
 
 Chrome 內建頁面、Chrome Web Store 和其他瀏覽器保護頁面不允許擴充功能注入內容，因此無法翻譯。
 
