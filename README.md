@@ -13,12 +13,8 @@ Gemini Web Translator 是一個 Chrome 擴充功能。它會找出網頁中的�
 翻譯只會在段落接近畫面時進行。它使用你自己的 Gemini API key，沒有中間伺服器，也不需要註冊其他服務。
 
 <p align="center">
-  <a href="assets/gemini-web-translator-demo.mp4">
-    <img src="assets/gemini-web-translator-demo.gif" alt="Gemini Web Translator demo" width="900">
-  </a>
+  <img src="assets/gemini-web-translator-demo.gif" alt="Gemini Web Translator demo" width="900">
 </p>
-
-<p align="center"><sub>點擊 Demo 下載高畫質 MP4</sub></p>
 
 ## Features
 
