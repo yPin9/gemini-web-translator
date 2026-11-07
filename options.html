@@ -9,7 +9,9 @@
     h1 { font-size: 20px; margin: 0 0 4px; }
     .sub { color: #5f6368; font-size: 13px; margin: 0 0 24px; }
     label { display: block; font-weight: 600; font-size: 14px; margin: 18px 0 6px; }
-    input, select { width: 100%; box-sizing: border-box; padding: 10px; font-size: 14px; border: 1px solid #dadce0; border-radius: 8px; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 10px; font: inherit; border: 1px solid #dadce0; border-radius: 8px; }
+    textarea { min-height: 130px; resize: vertical; font-family: Consolas, "Courier New", monospace; line-height: 1.5; }
+    .field-help { margin: 6px 0 0; color: #5f6368; font-size: 12px; line-height: 1.5; }
     .row { display: flex; gap: 10px; }
     .row > div { flex: 1; }
     .actions { margin-top: 24px; display: flex; gap: 10px; align-items: center; }
@@ -38,7 +40,8 @@
         <select id="model">
           <option value="gemini-flash-lite-latest">gemini-flash-lite-latest（推薦，永遠指向最新 lite，最省）</option>
           <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite（最省最快）</option>
-          <option value="gemini-3.6-flash">gemini-3.6-flash（品質更好）</option>
+          <option value="gemini-3.8-flash">gemini-3.8-flash（品質優先）</option>
+          <option value="gemini-3.6-flash">gemini-3.6-flash（舊版穩定模型）</option>
           <option value="gemini-flash-latest">gemini-flash-latest（永遠指向最新 flash）</option>
         </select>
       </div>
@@ -47,6 +50,12 @@
         <input id="targetLang" type="text" value="繁體中文" />
       </div>
     </div>
+
+    <label for="glossary">術語表</label>
+    <textarea id="glossary" placeholder="process&#10;program&#10;software = 軟體"></textarea>
+    <p class="field-help">
+      每行一筆。只填詞彙會保留原文，例如 <code>process</code>；使用 <code>source = target</code> 可指定固定譯法，例如 <code>software = 軟體</code>。最多讀取 100 筆。
+    </p>
 
     <div class="actions">
       <button id="save">儲存</button>
@@ -59,7 +68,8 @@
       1. 前往 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio → API keys</a>（用 Google 帳號登入）<br />
       2. 點 <code>Create API key</code>，複製產生的金鑰<br />
       3. 貼到上面欄位，按「儲存」→「測試連線」<br />
-      金鑰只存在你本機瀏覽器 (<code>chrome.storage.local</code>)，不會上傳。
+      金鑰會儲存在本機瀏覽器 (<code>chrome.storage.local</code>)，只在呼叫 Gemini API 時傳送給 Google 驗證。<br />
+      翻譯內容也會傳送給 Google；請勿在含敏感資料的頁面使用。
     </div>
   </div>
   <script src="options.js"></script>

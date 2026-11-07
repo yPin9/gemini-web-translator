@@ -12,11 +12,15 @@
   const MAX_ITEMS = 20;   // 每批最多幾段
   const MAX_CHARS = 3000; // 每批最多字元數
   const FLUSH_DELAY = 350;
+  const RETRY_DELAY = 3000;
+  const MAX_BATCH_RETRIES = 1;
 
   let active = false;
   let observer = null;
   let settings = null;
   let flushTimer = null;
+  let runId = 0;
+  let starting = false;
   const pending = new Set();   // 待翻譯的 unit
   const elUnits = new Map();   // el -> unit[]（供 IntersectionObserver 用）
 
@@ -31,12 +35,17 @@
   });
 
   async function toggle() {
-    if (active) { restore(); return 'off'; }
+    if (active || starting) { restore(); return 'off'; }
     return start();
   }
 
   async function start() {
-    settings = await getSettings();
+    const currentRun = ++runId;
+    starting = true;
+    const nextSettings = await getSettings();
+    if (currentRun !== runId) return 'off';
+    starting = false;
+    settings = nextSettings;
     if (!settings.apiKey) {
       toast('請先到擴充功能的「選項」頁面填入 Gemini API key。');
       chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS' });
@@ -58,6 +67,8 @@
   }
 
   function restore() {
+    runId += 1;
+    starting = false;
     active = false;
     if (observer) observer.disconnect();
     observer = null;
@@ -125,7 +136,7 @@
   }
 
   function makeUnit(el, text, insert) {
-    return { el, text, insert, queued: false, done: false };
+    return { el, text, insert, queued: false, done: false, retryCount: 0 };
   }
 
   function mkSpan(text) {
@@ -154,6 +165,7 @@
 
   async function flush() {
     if (!active || pending.size === 0) return;
+    const currentRun = runId;
     const items = [...pending];
     pending.clear();
 
@@ -170,13 +182,13 @@
     if (cur.length) batches.push(cur);
 
     for (const batch of batches) {
-      if (!active) return;
-      await translateBatch(batch);
+      if (!active || currentRun !== runId) return;
+      await translateBatch(batch, currentRun);
     }
-    if (active && pending.size > 0) scheduleFlush();
+    if (active && currentRun === runId && pending.size > 0) scheduleFlush();
   }
 
-  async function translateBatch(batch) {
+  async function translateBatch(batch, currentRun) {
     const texts = batch.map((u) => u.text);
     let res;
     try {
@@ -187,9 +199,30 @@
       res = { ok: false, error: String(e) };
     }
 
+    // 使用者可能在請求期間還原或重新啟動；舊工作不得再改動頁面。
+    if (!active || currentRun !== runId) return;
+
     if (!res || !res.ok) {
-      toast('翻譯失敗：' + (res ? res.error : '未知錯誤'));
-      batch.forEach((u) => { u.queued = false; }); // 可之後重試
+      const retryUnits = res?.retryable === false
+        ? []
+        : batch.filter((u) => u.retryCount < MAX_BATCH_RETRIES);
+      batch.forEach((u) => { u.queued = false; });
+
+      if (retryUnits.length > 0) {
+        retryUnits.forEach((u) => { u.retryCount += 1; });
+        toast('翻譯暫時失敗，將自動重試一次：' + (res ? res.error : '未知錯誤'));
+        setTimeout(() => {
+          if (!active || currentRun !== runId) return;
+          retryUnits.forEach((u) => {
+            if (u.done || u.queued) return;
+            u.queued = true;
+            pending.add(u);
+          });
+          scheduleFlush();
+        }, RETRY_DELAY);
+      } else {
+        toast('翻譯失敗：' + (res ? res.error : '未知錯誤'));
+      }
       badge('!', '#d93025');
       return;
     }

@@ -1,0 +1,9 @@
+{
+  "name": "gemini-web-translator",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "check": "node --check background.js && node --check content.js && node --check popup.js && node --check options.js",
+    "test": "node --test"
+  }
+}

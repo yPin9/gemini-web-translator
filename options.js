@@ -8,16 +8,18 @@ function setStatus(text, cls) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const s = await chrome.storage.local.get(['apiKey', 'model', 'targetLang']);
+  const s = await chrome.storage.local.get(['apiKey', 'model', 'targetLang', 'glossary']);
   if (s.apiKey) $('apiKey').value = s.apiKey;
   if (s.model) $('model').value = s.model;
   if (s.targetLang) $('targetLang').value = s.targetLang;
+  if (s.glossary) $('glossary').value = s.glossary;
 
   $('save').addEventListener('click', async () => {
     await chrome.storage.local.set({
       apiKey: $('apiKey').value.trim(),
       model: $('model').value,
-      targetLang: $('targetLang').value.trim() || '繁體中文'
+      targetLang: $('targetLang').value.trim() || '繁體中文',
+      glossary: $('glossary').value
     });
     setStatus('已儲存 ✓', 'ok');
   });

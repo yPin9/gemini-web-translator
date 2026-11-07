@@ -1,56 +1,149 @@
-# 雙語翻譯 (Gemini) — Chrome 擴充功能
+<p align="center">
+  <img src="icons/icon128.png" width="112" alt="Gemini Web Translator icon">
+</p>
 
-保留網頁原文，並在每個段落下方顯示 Gemini 翻譯（預設繁體中文）。風格類似「沉浸式翻譯」。
+<h1 align="center">Gemini Web Translator</h1>
 
-## 使用規則
-- **每台電腦、每個人都要填「自己的」Gemini API key**；別把別人的 key 拿來用，也**不要把 key 寫進程式碼或 commit 到 GitHub**（key 存在瀏覽器本機 `chrome.storage.local`，不會跟著 repo 走）。
-- **要翻譯的網頁必須是「安裝／重載擴充功能之後才開啟或重新整理」的分頁**，content script 才會注入；在舊分頁上按會沒反應，請先按 F5。
-- 觸發方式：按 **Alt+T**，或點工具列圖示 →「翻譯此頁」；**再按一次**還原原文。
-- 瀏覽器內建頁（`chrome://`）、Chrome 線上商店等頁面**無法翻譯**，這是瀏覽器的限制。
-- **免費層限制**：約每分鐘 15 次、每天 1,000 次請求；超過會回 `HTTP 429`，稍等幾秒會自動重試，不會扣錢。
-- 已經是中文、純數字或純符號的段落會自動略過，不送去翻。
-- 只要不在 Google Cloud 綁定帳單，就一律是免費層，不會產生費用。
+<p align="center">
+  <b>保留原文，在每個段落下方加上自然的臺灣繁體中文翻譯。</b>
+</p>
 
-## 功能
-- 點工具列按鈕或按 **Alt+T** 翻譯目前頁面；再按一次還原原文。
-- 進畫面才翻（捲到哪翻到哪），省 token。
-- 以段落為單位、批次呼叫 Gemini，譯文順序對齊。
-- 已是中文的段落自動跳過；翻譯失敗不影響原文。
+Gemini Web Translator 是一個 Chrome 擴充功能。它會找出網頁中的標題、段落和列表，將內容分批交給 Gemini，再把譯文放回原文下方。原始內容不會被覆蓋，再次切換即可還原頁面。
 
-## 一、免費申請 Gemini API Key
-1. 到 [Google AI Studio → API keys](https://aistudio.google.com/apikey)，用 Google 帳號登入。
-2. 點 **Create API key**，複製金鑰。
-3. 免費層級即可使用（有每分鐘/每日次數限制）。
+翻譯只會在段落接近畫面時進行。它使用你自己的 Gemini API key，沒有中間伺服器，也不需要註冊其他服務。
 
-## 二、取得程式碼
-- **用 git**：`git clone https://github.com/yPin9/gemini-web-translator.git`
-- **或**在 GitHub 頁面點 **Code → Download ZIP**，解壓縮。
-- 之後要更新：在資料夾裡執行 `git pull`，再到 `chrome://extensions` 點該擴充功能的 🔄 重新載入。
+## Install
 
-## 三、安裝（載入未封裝擴充功能）
-1. Chrome 網址列輸入 `chrome://extensions`。
-2. 右上角開啟 **開發人員模式 (Developer mode)**。
-3. 點 **載入未封裝項目 (Load unpacked)**，選擇你 clone / 解壓後的資料夾。
-4. 安裝後，點該擴充功能的 **選項 / Options**（或工具列圖示 → 開啟選項設定）。
-5. 貼上你自己的 API key → 按「儲存」→「測試連線」確認成功。
+```sh
+git clone https://github.com/yPin9/gemini-web-translator.git
+cd gemini-web-translator
+```
 
-> 在**多台電腦**用：每台都 clone/下載 → 載入未封裝 → 各自填一次自己的 API key（key 存在該台瀏覽器，不會上傳、也不會跟著 repo 走）。
+不使用 Git 的話，可以在 GitHub 選擇 **Code → Download ZIP**，下載後解壓縮。
 
-## 四、使用
-- 打開任一網頁 → 點工具列圖示 → **翻譯此頁**，或直接按 **Alt+T**。
-- 譯文會以藍色小字接在每段原文下方。
-- 再按一次 Alt+T 或按「還原原文」即可清除譯文。
+接著在 Chrome 中：
 
-## 檔案說明
-| 檔案 | 作用 |
-|------|------|
-| `manifest.json` | 擴充功能設定 (Manifest V3) |
-| `background.js` | Service worker：呼叫 Gemini API、快捷鍵、badge |
-| `content.js` / `content.css` | 掃描段落、插入譯文、還原 |
-| `popup.html` / `popup.js` | 工具列小視窗 |
-| `options.html` / `options.js` | 設定 API key、模型、目標語言 |
+1. 開啟 `chrome://extensions`。
+2. 開啟「開發人員模式」。
+3. 點選「載入未封裝項目」。
+4. 選擇專案資料夾。
 
-## 備註
-- API key 只存在本機瀏覽器 `chrome.storage.local`，不會上傳到第三方。
-- 預設模型為 `gemini-flash-lite-latest`（永遠指向最新、最省的 Flash-Lite）。
-- 若翻譯出現 `HTTP 429`，代表達到免費速率上限（免費層每分鐘 15 次），稍等幾秒會自動重試。
+安裝或重新載入擴充功能後，原本已經開啟的分頁需要重新整理一次。
+
+## Quick start
+
+1. 前往 [Google AI Studio](https://aistudio.google.com/apikey) 建立自己的 Gemini API key。
+2. 開啟擴充功能的「選項」頁面，貼上 key 並按「儲存」。
+3. 如果有專有名詞或固定譯法，在同一頁的「術語表」欄位加入規則。
+4. 按「測試連線」確認設定正確。
+5. 打開要閱讀的網頁，按 **Alt+T**，或從工具列選擇「翻譯此頁」。
+6. 再按一次 **Alt+T**，或選擇「還原原文」，即可移除譯文。
+
+Chrome 內建頁面、Chrome Web Store 和其他瀏覽器保護頁面不允許擴充功能注入內容，因此無法翻譯。
+
+## How it works
+
+啟動翻譯時，content script 會掃描目前頁面，略過不可見、可編輯、程式碼、純符號及中文比例很高的內容。符合條件的段落會交給 `IntersectionObserver`，只有接近畫面的內容才會進入翻譯佇列。
+
+每個批次最多包含 20 段或 3,000 個字元。service worker 會套用術語保護與臺灣繁中翻譯指令，呼叫 Gemini API，然後驗證回傳的 JSON、資料型別及譯文數量。驗證通過後，content script 才會把譯文插入原文下方。
+
+請求支援 30 秒逾時、`Retry-After`、指數退避和有限次數重試。如果使用者在請求期間還原或重新啟動翻譯，舊回應會失效，不會再修改頁面。
+
+## Terms
+
+術語表可以保留專有名詞，或替詞彙指定固定譯法。
+
+設定位置：
+
+1. 點擊 Chrome 工具列上的 Gemini Web Translator icon。
+2. 選擇「開啟選項設定」。
+3. 在「術語表」欄位中，每行填寫一筆規則。
+4. 按「儲存」後，新的翻譯工作就會使用這份規則表。
+
+也可以從 `chrome://extensions` 找到 Gemini Web Translator，進入「詳細資料」後選擇「擴充功能選項」。
+
+規則分成兩種：
+
+| 想要的行為 | 寫法 | 結果 |
+|---|---|---|
+| 這個詞不要翻譯 | `process` | 原文是 `Process`，譯文仍保留 `Process` |
+| 這個詞一定要這樣翻 | `software = 軟體` | 每次命中 `software` 都使用「軟體」 |
+
+完整範例：
+
+```text
+# 保留原文
+process
+program
+C++
+OpenAI
+
+# 指定固定譯法
+software = 軟體
+database = 資料庫
+memory = 記憶體
+```
+
+只填一個詞時，譯文會保留網頁中的原詞和大小寫。使用 `來源詞 = 目標詞` 時，擴充功能會套用指定譯法。
+
+- 英文字母比對不區分大小寫。
+- 只比對完整詞彙；`process` 不會命中 `processing`。
+- 較長的詞彙優先。
+- 空白行和以 `#` 開頭的行會略過。
+- 重複詞彙以第一筆為準。
+- 最多讀取 100 筆，每個來源詞最長 100 個字元。
+
+送出翻譯前，命中的術語會被換成保護標記。Gemini 回傳後，擴充功能才會還原原詞或套用固定譯法。如果標記遺失、遭到修改或重複，該批結果會被拒絕。
+
+目前術語表不是專案資料夾裡的獨立規則檔，不需要修改 `background.js` 或其他程式碼。按下「儲存」後，內容會寫入目前瀏覽器的 `chrome.storage.local`；不同電腦或不同 Chrome 使用者設定檔需要各自設定一次。
+
+## Configuration
+
+| 設定 | 說明 |
+|---|---|
+| Gemini API Key | 儲存在本機，呼叫 Gemini 時用於驗證 |
+| 模型 | 預設為 `gemini-flash-lite-latest` |
+| 目標語言 | 預設為 `繁體中文` |
+| 術語表 | 保留原詞或指定固定譯法 |
+
+當目標語言包含繁體中文、正體中文、Traditional Chinese 或 `zh-TW` 時，擴充功能會要求 Gemini 使用臺灣常見詞彙和語序，並避免簡體字及中國大陸慣用詞。
+
+免費層可用模型與額度可能調整，實際狀態以 Google AI Studio 顯示的內容為準。本擴充功能不會替使用者開啟付費功能，是否計費取決於 API key 所屬 Google Cloud 專案。
+
+## Privacy
+
+這個專案沒有自建後端。API key、模型、目標語言和術語表都儲存在瀏覽器的 `chrome.storage.local`。
+
+只有在使用者啟動翻譯後，畫面附近需要翻譯的網頁文字才會直接傳送到 Google Gemini API。API key 透過 `x-goog-api-key` header 傳送，不會放在 URL。
+
+不要把 API key 寫進程式碼、commit 到 GitHub，或交給其他人共用。也不要在含有密碼、個人資料、公司機密或其他敏感資訊的頁面啟動翻譯。
+
+## Development
+
+這是一個沒有建置步驟的 Chrome Manifest V3 擴充功能。測試使用 Node.js 內建工具，建議使用 Node.js 18 以上版本。
+
+```sh
+npm run check
+npm test
+```
+
+`npm run check` 會檢查 JavaScript 語法。`npm test` 會測試 API key 傳送方式、暫時性錯誤重試、譯文數量驗證、術語保護，以及還原頁面後忽略舊 API 回應。
+
+主要檔案：
+
+| 檔案 | 用途 |
+|---|---|
+| `background.js` | Gemini API、術語保護、回應驗證與重試 |
+| `content.js` | 掃描段落、安排翻譯、插入譯文與還原頁面 |
+| `popup.html` / `popup.js` | 工具列選單 |
+| `options.html` / `options.js` | API key、模型、目標語言與術語表設定 |
+| `test/` | 回歸測試 |
+
+## Status
+
+目前可以翻譯一般靜態網頁，以及捲動後才進入畫面的既有段落。
+
+- SPA 在啟動翻譯後動態新增的內容不一定會被偵測。
+- 術語表尚未支援匯入、匯出或跨裝置同步。
+- 專案尚未發佈到 Chrome Web Store，需要自行載入專案資料夾。
+- 翻譯品質、可用模型與額度取決於 Gemini API。

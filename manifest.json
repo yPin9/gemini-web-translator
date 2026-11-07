@@ -3,6 +3,12 @@
   "name": "雙語翻譯 (Gemini)",
   "version": "1.0.0",
   "description": "保留網頁原文，在下方顯示 Gemini 翻譯的雙語對照擴充功能。",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["storage", "activeTab"],
   "host_permissions": ["https://generativelanguage.googleapis.com/"],
   "background": {
@@ -10,7 +16,11 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "雙語翻譯 (Gemini)"
+    "default_title": "雙語翻譯 (Gemini)",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
   },
   "options_page": "options.html",
   "content_scripts": [
