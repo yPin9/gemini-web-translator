@@ -8,6 +8,10 @@
   const SKIP_CLOSEST =
     'script, style, code, pre, noscript, textarea, svg, .gt-translation, [contenteditable="true"]';
   const TRANS_CLASS = 'gt-translation';
+  const ANCHOR_CLASS = 'gt-observe-anchor';
+  const PAIR_CLASS = 'gt-pair';
+  const ACTIVE_PAIR_CLASS = 'gt-pair-active';
+  const SOURCE_HIGHLIGHT = 'gt-source-pair';
 
   const MAX_ITEMS = 20;   // 每批最多幾段
   const MAX_CHARS = 3000; // 每批最多字元數
@@ -21,8 +25,17 @@
   let flushTimer = null;
   let runId = 0;
   let starting = false;
+  const pairUnits = new Map();
+  let pairSequence = 0;
+  let highlightedUnit = null;
+  let lockedUnit = null;
   const pending = new Set();   // 待翻譯的 unit
   const elUnits = new Map();   // el -> unit[]（供 IntersectionObserver 用）
+
+  document.addEventListener?.('pointerover', onPairPointerOver, true);
+  document.addEventListener?.('pointerout', onPairPointerOut, true);
+  document.addEventListener?.('click', onPairClick, true);
+  document.addEventListener?.('keydown', onPairKeyDown, true);
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === 'TOGGLE') {
@@ -74,8 +87,11 @@
     observer = null;
     pending.clear();
     elUnits.clear();
+    pairUnits.clear();
+    lockedUnit = null;
+    clearPairHighlight();
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    document.querySelectorAll('.' + TRANS_CLASS).forEach((n) => n.remove());
+    document.querySelectorAll('.' + TRANS_CLASS + ', .' + ANCHOR_CLASS).forEach((n) => n.remove());
     badge('', '');
   }
 
@@ -84,7 +100,11 @@
     elUnits.clear();
     for (const el of collectLeaves()) {
       const units = segment(el);
-      if (units.length) elUnits.set(el, units);
+      for (const unit of units) {
+        const target = unit.observeTarget || el;
+        if (!elUnits.has(target)) elUnits.set(target, []);
+        elUnits.get(target).push(unit);
+      }
     }
   }
 
@@ -103,43 +123,187 @@
 
     // 一般情況：整塊當一段
     if (brCount < 2) {
-      const text = getText(el);
-      if (!translatable(text)) return [];
-      return [makeUnit(el, text, (t) => el.appendChild(mkSpan(t)))];
+      const model = buildTextModel(el);
+      return makeGroupUnits(el, model, (container) => el.appendChild(container), el);
     }
 
-    // <br> 分段：依文字節點順序累積，遇到 <br> 就切一段，譯文插在該 <br> 前
-    const units = [];
+    // 老式網頁常用 <br><br> 分段；單一 <br> 只是段內換行，不應拆成 API 單元。
+    const paragraphs = [];
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-    let buf = '';
+    let text = '';
+    let runs = [];
+    let firstTextNode = null;
+    let pendingBreaks = [];
     let node;
-    const push = (anchorBr) => {
-      const text = buf.trim();
-      buf = '';
-      if (!translatable(text)) return;
-      units.push(
-        makeUnit(el, text, (t) => {
-          if (anchorBr && anchorBr.parentNode) anchorBr.parentNode.insertBefore(mkSpan(t), anchorBr);
-          else el.appendChild(mkSpan(t)); // 最後一段：接在整塊尾端
-        })
-      );
+
+    const pushParagraph = (anchorBr) => {
+      if (text.trim()) paragraphs.push({ model: { text, runs }, firstTextNode, anchorBr });
+      text = '';
+      runs = [];
+      firstTextNode = null;
     };
+
     while ((node = walker.nextNode())) {
       if (node.nodeType === Node.TEXT_NODE) {
-        buf += node.nodeValue;
+        if (!node.nodeValue.trim()) continue;
+
+        if (pendingBreaks.length >= 2) {
+          pushParagraph(pendingBreaks[0]);
+        } else if (pendingBreaks.length === 1 && text.length > 0) {
+          text += ' ';
+        }
+        pendingBreaks = [];
+
+        if (!firstTextNode) firstTextNode = node;
+        const start = text.length;
+        text += node.nodeValue;
+        runs.push({ node, start, end: text.length });
       } else if (node.nodeName === 'BR') {
-        if (buf.trim()) push(node); // 只在累積到文字後才切段（連續 <br> 不會產生空段）
+        pendingBreaks.push(node);
       }
     }
-    if (buf.trim()) push(null);
+
+    if (text.length > 0) {
+      pushParagraph(pendingBreaks.length >= 2 ? pendingBreaks[0] : null);
+    }
+
+    // 每段建立自己的觀察錨點，避免一個超長 <td> 進入畫面時排入整篇文章。
+    const units = [];
+    for (const paragraph of paragraphs) {
+      if (!translatable(paragraph.model.text)) continue;
+
+      const observeTarget = mkObserveAnchor();
+      if (paragraph.firstTextNode?.parentNode) {
+        paragraph.firstTextNode.parentNode.insertBefore(observeTarget, paragraph.firstTextNode);
+      } else {
+        el.insertBefore(observeTarget, el.firstChild);
+      }
+
+      const place = (container) => {
+        if (paragraph.anchorBr?.parentNode) {
+          paragraph.anchorBr.parentNode.insertBefore(container, paragraph.anchorBr);
+        } else {
+          el.appendChild(container);
+        }
+      };
+      units.push(...makeGroupUnits(el, paragraph.model, place, observeTarget));
+    }
     return units;
   }
 
-  function makeUnit(el, text, insert) {
-    return { el, text, insert, queued: false, done: false, retryCount: 0 };
+  function buildTextModel(el) {
+    if (!document.createTreeWalker) return { text: getText(el), runs: [] };
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const runs = [];
+    let text = '';
+    let node;
+    while ((node = walker.nextNode())) {
+      if (!node.nodeValue) continue;
+      const start = text.length;
+      text += node.nodeValue;
+      runs.push({ node, start, end: text.length });
+    }
+    return { text, runs };
   }
 
-  function mkSpan(text) {
+  function splitText(text) {
+    const chunks = [];
+    const add = (start, end) => {
+      while (start < end && /\s/.test(text[start])) start += 1;
+      while (end > start && /\s/.test(text[end - 1])) end -= 1;
+      if (end <= start) return;
+      const value = text.slice(start, end).replace(/\s+/g, ' ').trim();
+      if (translatable(value)) chunks.push({ text: value, start, end });
+    };
+
+    if (typeof Intl?.Segmenter === 'function') {
+      const segmenter = new Intl.Segmenter(undefined, { granularity: 'sentence' });
+      for (const part of segmenter.segment(text)) add(part.index, part.index + part.segment.length);
+    } else {
+      const pattern = /[^.!?。！？…]+(?:[.!?。！？…]+|$)\s*/gu;
+      let match;
+      while ((match = pattern.exec(text))) add(match.index, match.index + match[0].length);
+    }
+    return chunks;
+  }
+
+  function makeSourceRanges(model, start, end) {
+    if (!document.createRange) return [];
+    const ranges = [];
+    for (const run of model.runs) {
+      const overlapStart = Math.max(start, run.start);
+      const overlapEnd = Math.min(end, run.end);
+      if (overlapStart >= overlapEnd) continue;
+      const range = document.createRange();
+      range.setStart(run.node, overlapStart - run.start);
+      range.setEnd(run.node, overlapEnd - run.start);
+      ranges.push(range);
+    }
+    return ranges;
+  }
+
+  function makeGroupUnits(el, model, place, observeTarget) {
+    const chunks = splitText(model.text);
+    if (chunks.length === 0) return [];
+
+    const group = { container: null, place, translations: [], units: [] };
+    chunks.forEach((chunk, index) => {
+      const unit = {
+        el,
+        text: chunk.text,
+        observeTarget,
+        pairId: 'gt-' + (++pairSequence),
+        sourceRanges: makeSourceRanges(model, chunk.start, chunk.end),
+        translationNode: null,
+        queued: false,
+        done: false,
+        retryCount: 0
+      };
+      unit.insert = (translation) => {
+        group.translations[index] = translation;
+        renderTranslationGroup(group);
+      };
+      group.units.push(unit);
+      pairUnits.set(unit.pairId, unit);
+    });
+    return group.units;
+  }
+
+  function renderTranslationGroup(group) {
+    if (!group.container) {
+      group.container = mkSpan();
+      group.place(group.container);
+    }
+
+    const nodes = [];
+    group.translations.forEach((translation, index) => {
+      if (!translation) return;
+      if (nodes.length && document.createTextNode) nodes.push(document.createTextNode(' '));
+      const unit = group.units[index];
+      const span = document.createElement('span');
+      span.className = PAIR_CLASS;
+      span.setAttribute('data-gt-pair', unit.pairId);
+      span.textContent = translation;
+      unit.translationNode = span;
+      nodes.push(span);
+    });
+
+    if (group.container.replaceChildren) {
+      group.container.replaceChildren(...nodes);
+    } else {
+      group.container.textContent = '';
+      nodes.forEach((node) => group.container.appendChild(node));
+    }
+  }
+
+  function mkObserveAnchor() {
+    const span = document.createElement('span');
+    span.className = ANCHOR_CLASS;
+    span.setAttribute('aria-hidden', 'true');
+    return span;
+  }
+
+  function mkSpan(text = '') {
     const span = document.createElement('span');
     span.className = TRANS_CLASS; // CSS 設 display:block；用 span 放進 p/font 都合法
     span.textContent = text;
@@ -147,6 +311,61 @@
   }
 
   // ---- 進畫面 → 排隊 → 批次翻譯 ----
+  function pairFromTarget(target) {
+    const pair = target?.closest?.('.' + PAIR_CLASS);
+    if (!pair) return null;
+    return pairUnits.get(pair.getAttribute('data-gt-pair')) || null;
+  }
+
+  function showPairHighlight(unit) {
+    if (!unit || highlightedUnit === unit) return;
+    clearPairHighlight();
+    highlightedUnit = unit;
+    unit.translationNode?.classList?.add(ACTIVE_PAIR_CLASS);
+    if (globalThis.CSS?.highlights && typeof globalThis.Highlight === 'function' && unit.sourceRanges.length) {
+      CSS.highlights.set(SOURCE_HIGHLIGHT, new Highlight(...unit.sourceRanges));
+    } else {
+      unit.el?.classList?.add('gt-source-pair-fallback');
+    }
+  }
+
+  function clearPairHighlight() {
+    highlightedUnit?.translationNode?.classList?.remove(ACTIVE_PAIR_CLASS);
+    highlightedUnit?.el?.classList?.remove('gt-source-pair-fallback');
+    globalThis.CSS?.highlights?.delete(SOURCE_HIGHLIGHT);
+    highlightedUnit = null;
+  }
+
+  function onPairPointerOver(event) {
+    if (!active || lockedUnit) return;
+    const unit = pairFromTarget(event.target);
+    if (unit) showPairHighlight(unit);
+  }
+
+  function onPairPointerOut(event) {
+    if (!active || lockedUnit || !pairFromTarget(event.target)) return;
+    if (!pairFromTarget(event.relatedTarget)) clearPairHighlight();
+  }
+
+  function onPairClick(event) {
+    if (!active) return;
+    const unit = pairFromTarget(event.target);
+    if (unit) {
+      lockedUnit = lockedUnit === unit ? null : unit;
+      if (lockedUnit) showPairHighlight(lockedUnit);
+      else clearPairHighlight();
+      return;
+    }
+    lockedUnit = null;
+    clearPairHighlight();
+  }
+
+  function onPairKeyDown(event) {
+    if (event.key !== 'Escape') return;
+    lockedUnit = null;
+    clearPairHighlight();
+  }
+
   function onIntersect(entries) {
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;

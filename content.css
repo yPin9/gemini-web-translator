@@ -10,6 +10,38 @@
   text-align: left;
 }
 
+.gt-pair {
+  border-radius: 3px;
+  cursor: default;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.gt-pair:hover,
+.gt-pair-active {
+  background: rgba(251, 188, 4, 0.2);
+  box-shadow: 0 0 0 2px rgba(251, 188, 4, 0.2);
+}
+
+::highlight(gt-source-pair) {
+  color: inherit;
+  background-color: rgba(251, 188, 4, 0.32);
+}
+
+.gt-source-pair-fallback {
+  background-color: rgba(251, 188, 4, 0.18) !important;
+}
+
+.gt-observe-anchor {
+  display: inline-block;
+  width: 1px;
+  height: 1px;
+  margin-left: -1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  vertical-align: baseline;
+}
+
 .gt-toast {
   position: fixed;
   z-index: 2147483647;
