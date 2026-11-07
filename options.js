@@ -42,4 +42,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       setStatus('失敗：' + (res ? res.error : '未知錯誤'), 'err');
     }
   });
+
+  $('clearCache').addEventListener('click', async () => {
+    await chrome.storage.local.remove('translationCache');
+    setStatus('翻譯快取已清除', 'ok');
+  });
 });

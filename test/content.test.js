@@ -91,7 +91,7 @@ test('a translation response arriving after restore cannot modify the page', asy
   assert.equal(inserted.length, 0);
 });
 
-test('legacy br layouts translate only visible paragraphs and keep single breaks together', async () => {
+test('legacy br layouts prefetch a large window and keep single breaks together', async () => {
   let messageListener;
   let intersectionObserver;
   let sourceHighlight;
@@ -110,6 +110,7 @@ test('legacy br layouts translate only visible paragraphs and keep single breaks
         add(value) { classes.add(value); },
         remove(value) { classes.delete(value); }
       },
+      appendChild(node) { this.children.push(node); },
       closest(selector) {
         return selector === '.gt-pair' && this.className === 'gt-pair' ? this : null;
       },
@@ -124,13 +125,34 @@ test('legacy br layouts translate only visible paragraphs and keep single breaks
   const parent = {
     insertBefore(node, anchor) { inserted.push({ node, anchor }); }
   };
-  const textNode = (value) => ({ nodeType: 3, nodeValue: value, parentNode: parent });
+  const sourceLink = {
+    href: 'https://example.com/great-work',
+    getAttribute(name) {
+      return { href: this.href, target: '_blank', title: 'Read more' }[name] || '';
+    }
+  };
+  const textNode = (value, parentElement = null) => ({
+    nodeType: 3,
+    nodeValue: value,
+    parentElement,
+    parentNode: parent
+  });
   const br = () => ({ nodeType: 1, nodeName: 'BR', parentNode: parent });
   const nodes = [
-    textNode('First sentence.'), br(), textNode('Second sentence!'), br(), br(),
+    textNode('First sentence.', { closest: () => sourceLink }), br(),
+    textNode('Second sentence!'), br(), br(),
     textNode('Second paragraph'), br(), br(), textNode('Third paragraph')
   ];
   const breaks = nodes.filter((node) => node.nodeName === 'BR');
+  const nestedQuote = {
+    closest() { return null; },
+    contains() { return false; },
+    getClientRects() { return [{}]; },
+    getElementsByTagName() { return [breaks[0]]; },
+    parentElement: { closest: () => element },
+    querySelectorAll() { return []; },
+    textContent: 'A short quotation near the end.'
+  };
 
   const element = {
     appendChild(node) { inserted.push({ node, anchor: null }); },
@@ -138,10 +160,11 @@ test('legacy br layouts translate only visible paragraphs and keep single breaks
     firstChild: nodes[0],
     getClientRects() { return [{}]; },
     getElementsByTagName(name) { return name === 'br' ? breaks : []; },
-    innerText: 'First sentence. Second sentence! Second paragraph Third paragraph',
+    contains(child) { return child === nestedQuote; },
+    innerText: ('First sentence. Second sentence! Second paragraph Third paragraph ').repeat(5),
     insertBefore(node, anchor) { inserted.push({ node, anchor }); },
-    querySelectorAll() { return []; },
-    textContent: 'First sentence. Second sentence! Second paragraph Third paragraph'
+    querySelectorAll() { return [nestedQuote]; },
+    textContent: ('First sentence. Second sentence! Second paragraph Third paragraph ').repeat(5)
   };
 
   const document = {
@@ -159,7 +182,7 @@ test('legacy br layouts translate only visible paragraphs and keep single breaks
       return { nextNode: () => nodes[index++] || null };
     },
     documentElement: { appendChild() {} },
-    querySelectorAll(selector) { return selector.startsWith('.') ? [] : [element]; }
+    querySelectorAll(selector) { return selector.startsWith('.') ? [] : [element, nestedQuote]; }
   };
 
   class FakeIntersectionObserver {
@@ -209,6 +232,8 @@ test('legacy br layouts translate only visible paragraphs and keep single breaks
     document,
     getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
     setTimeout,
+    URL,
+    location: { href: 'https://example.com/article' },
     window: {},
     CSS: {
       highlights: {
@@ -234,12 +259,19 @@ test('legacy br layouts translate only visible paragraphs and keep single breaks
   await wait(400);
 
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].length, 2);
-  assert.equal(requests[0][0], 'First sentence.');
+  assert.equal(requests[0].length, 4);
+  assert.equal(requests[0][0], '⟦L0⟧First sentence.⟦/L0⟧');
   assert.equal(requests[0][1], 'Second sentence!');
+  assert.equal(requests[0][2], 'Second paragraph');
+  assert.equal(requests[0][3], 'Third paragraph');
 
   const translation = inserted.find(({ node }) => node.className === 'gt-translation').node;
   const firstPair = translation.children.find((node) => node.className === 'gt-pair');
+  const translatedLink = firstPair.children.find((node) => node.className === 'gt-preserved-link');
+  assert.equal(translatedLink.href, sourceLink.href);
+  assert.equal(translatedLink.target, '_blank');
+  assert.equal(translatedLink.rel, 'noopener noreferrer');
+  assert.equal(translatedLink.textContent, 'First sentence.');
   listeners.pointerover({ target: firstPair });
 
   assert.equal(sourceHighlight.name, 'gt-source-pair');

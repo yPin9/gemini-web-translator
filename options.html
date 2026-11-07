@@ -18,6 +18,7 @@
     button { padding: 10px 18px; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
     #save { background: #4285f4; color: #fff; }
     #test { background: #f1f3f4; color: #202124; }
+    #clearCache { margin-top: 10px; background: #f1f3f4; color: #3c4043; }
     #status { font-size: 13px; }
     .ok { color: #188038; }
     .err { color: #c5221f; }
@@ -62,6 +63,10 @@
       <button id="test">測試連線</button>
       <span id="status"></span>
     </div>
+
+    <label>翻譯快取</label>
+    <p class="field-help">已翻譯的文字會保存在本機，重新整理或再次閱讀時不會重複消耗 API 額度。</p>
+    <button id="clearCache">清除翻譯快取</button>
 
     <div class="help">
       <b>還沒有 API key？</b> 免費申請步驟：<br />

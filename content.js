@@ -13,8 +13,8 @@
   const ACTIVE_PAIR_CLASS = 'gt-pair-active';
   const SOURCE_HIGHLIGHT = 'gt-source-pair';
 
-  const MAX_ITEMS = 20;   // 每批最多幾段
-  const MAX_CHARS = 3000; // 每批最多字元數
+  const MAX_ITEMS = 60;   // 減少短句切分造成的額外 API 請求
+  const MAX_CHARS = 6000;
   const FLUSH_DELAY = 350;
   const RETRY_DELAY = 3000;
   const MAX_BATCH_RETRIES = 1;
@@ -26,6 +26,9 @@
   let runId = 0;
   let starting = false;
   const pairUnits = new Map();
+  const orderedTargets = [];
+  const targetIndexes = new Map();
+  const prefetchedTargetIndexes = new Set();
   let pairSequence = 0;
   let highlightedUnit = null;
   let lockedUnit = null;
@@ -88,6 +91,9 @@
     pending.clear();
     elUnits.clear();
     pairUnits.clear();
+    orderedTargets.length = 0;
+    targetIndexes.clear();
+    prefetchedTargetIndexes.clear();
     lockedUnit = null;
     clearPairHighlight();
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
@@ -98,11 +104,18 @@
   // ---- 建立可翻譯單元 ----
   function buildUnits() {
     elUnits.clear();
+    orderedTargets.length = 0;
+    targetIndexes.clear();
+    prefetchedTargetIndexes.clear();
     for (const el of collectLeaves()) {
       const units = segment(el);
       for (const unit of units) {
         const target = unit.observeTarget || el;
-        if (!elUnits.has(target)) elUnits.set(target, []);
+        if (!elUnits.has(target)) {
+          elUnits.set(target, []);
+          targetIndexes.set(target, orderedTargets.length);
+          orderedTargets.push(target);
+        }
         elUnits.get(target).push(unit);
       }
     }
@@ -114,7 +127,24 @@
       (el) => !el.closest(SKIP_CLOSEST) && isVisible(el) && el.textContent.trim().length > 1
     );
     const set = new Set(all);
-    return all.filter((el) => ![...el.querySelectorAll(SELECTOR)].some((c) => set.has(c)));
+    const legacyContainers = new Set(all.filter((el) => {
+      if (el.getElementsByTagName('br').length < 2 || el.textContent.trim().length < 200) return false;
+      const nestedTextLength = all.reduce((total, child) => {
+        if (child === el || !el.contains(child)) return total;
+        const nearestSelectedParent = child.parentElement?.closest?.(SELECTOR);
+        return nearestSelectedParent === el ? total + child.textContent.trim().length : total;
+      }, 0);
+      return nestedTextLength / el.textContent.trim().length < 0.5;
+    }));
+
+    return all.filter((el) => {
+      const legacyAncestor = all.find(
+        (candidate) => candidate !== el && legacyContainers.has(candidate) && candidate.contains(el)
+      );
+      if (legacyAncestor) return false;
+      if (legacyContainers.has(el)) return true;
+      return ![...el.querySelectorAll(SELECTOR)].some((child) => set.has(child));
+    });
   }
 
   // 把一個葉子切成段落單元；老網站用 <br><br> 分段也能逐段處理
@@ -157,7 +187,7 @@
         if (!firstTextNode) firstTextNode = node;
         const start = text.length;
         text += node.nodeValue;
-        runs.push({ node, start, end: text.length });
+        runs.push({ node, start, end: text.length, link: findSourceLink(node) });
       } else if (node.nodeName === 'BR') {
         pendingBreaks.push(node);
       }
@@ -201,9 +231,13 @@
       if (!node.nodeValue) continue;
       const start = text.length;
       text += node.nodeValue;
-      runs.push({ node, start, end: text.length });
+      runs.push({ node, start, end: text.length, link: findSourceLink(node) });
     }
     return { text, runs };
+  }
+
+  function findSourceLink(node) {
+    return node.parentElement?.closest?.('a[href]') || null;
   }
 
   function splitText(text) {
@@ -242,15 +276,62 @@
     return ranges;
   }
 
+  function getLinkDetails(anchor) {
+    if (!anchor) return null;
+    const href = anchor.href || anchor.getAttribute?.('href');
+    if (!href) return null;
+    try {
+      const url = new URL(href, location.href);
+      if (!['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)) return null;
+      return {
+        href: url.href,
+        target: anchor.getAttribute?.('target') || '',
+        title: anchor.getAttribute?.('title') || ''
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function addLinkMarkers(model, chunk) {
+    const byAnchor = new Map();
+    for (const run of model.runs) {
+      if (!run.link || run.end <= chunk.start || run.start >= chunk.end) continue;
+      const start = Math.max(run.start, chunk.start);
+      const end = Math.min(run.end, chunk.end);
+      const current = byAnchor.get(run.link);
+      if (current) {
+        current.start = Math.min(current.start, start);
+        current.end = Math.max(current.end, end);
+      } else {
+        const details = getLinkDetails(run.link);
+        if (details) byAnchor.set(run.link, { ...details, start, end });
+      }
+    }
+
+    const links = [...byAnchor.values()].sort((a, b) => a.start - b.start);
+    let text = model.text.slice(chunk.start, chunk.end);
+    for (let index = links.length - 1; index >= 0; index -= 1) {
+      const link = links[index];
+      const start = link.start - chunk.start;
+      const end = link.end - chunk.start;
+      text = text.slice(0, start) + `⟦L${index}⟧` + text.slice(start, end) +
+        `⟦/L${index}⟧` + text.slice(end);
+    }
+    return { text: text.replace(/\s+/g, ' ').trim(), links };
+  }
+
   function makeGroupUnits(el, model, place, observeTarget) {
     const chunks = splitText(model.text);
     if (chunks.length === 0) return [];
 
     const group = { container: null, place, translations: [], units: [] };
     chunks.forEach((chunk, index) => {
+      const linked = addLinkMarkers(model, chunk);
       const unit = {
         el,
-        text: chunk.text,
+        text: linked.text,
+        links: linked.links,
         observeTarget,
         pairId: 'gt-' + (++pairSequence),
         sourceRanges: makeSourceRanges(model, chunk.start, chunk.end),
@@ -283,7 +364,7 @@
       const span = document.createElement('span');
       span.className = PAIR_CLASS;
       span.setAttribute('data-gt-pair', unit.pairId);
-      span.textContent = translation;
+      renderPairContent(span, translation, unit);
       unit.translationNode = span;
       nodes.push(span);
     });
@@ -294,6 +375,52 @@
       group.container.textContent = '';
       nodes.forEach((node) => group.container.appendChild(node));
     }
+  }
+
+  function makePreservedLink(link, label, fallback = false) {
+    const anchor = document.createElement('a');
+    anchor.className = 'gt-preserved-link' + (fallback ? ' gt-link-fallback' : '');
+    anchor.href = link.href;
+    if (link.target) anchor.target = link.target;
+    if (link.target === '_blank') anchor.rel = 'noopener noreferrer';
+    if (link.title) anchor.title = link.title;
+    anchor.textContent = label;
+    return anchor;
+  }
+
+  function renderPairContent(span, translation, unit) {
+    if (!unit.links.length || !span.appendChild || !document.createTextNode) {
+      span.textContent = translation;
+      return;
+    }
+
+    const pattern = /⟦L(\d+)⟧([\s\S]*?)⟦\/L\1⟧/g;
+    const matches = [...translation.matchAll(pattern)];
+    const ids = matches.map((match) => Number(match[1]));
+    const valid = matches.length === unit.links.length &&
+      new Set(ids).size === unit.links.length &&
+      ids.every((id) => id >= 0 && id < unit.links.length);
+
+    if (valid) {
+      let offset = 0;
+      for (const match of matches) {
+        if (match.index > offset) {
+          span.appendChild(document.createTextNode(translation.slice(offset, match.index)));
+        }
+        span.appendChild(makePreservedLink(unit.links[Number(match[1])], match[2]));
+        offset = match.index + match[0].length;
+      }
+      if (offset < translation.length) {
+        span.appendChild(document.createTextNode(translation.slice(offset)));
+      }
+      return;
+    }
+
+    span.textContent = translation.replace(/⟦\/?L\d+⟧/g, '').trim();
+    unit.links.forEach((link) => {
+      span.appendChild(document.createTextNode(' '));
+      span.appendChild(makePreservedLink(link, '↗', true));
+    });
   }
 
   function mkObserveAnchor() {
@@ -367,14 +494,50 @@
   }
 
   function onIntersect(entries) {
+    let firstVisibleIndex = Infinity;
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
       observer.unobserve(entry.target);
-      for (const u of elUnits.get(entry.target) || []) {
-        if (!u.queued && !u.done) { u.queued = true; pending.add(u); }
+      const index = targetIndexes.get(entry.target);
+      if (index == null) {
+        queueUnits(elUnits.get(entry.target) || []);
+      } else {
+        firstVisibleIndex = Math.min(firstVisibleIndex, index);
       }
     }
-    scheduleFlush();
+    if (Number.isFinite(firstVisibleIndex)) queueAhead(firstVisibleIndex);
+    if (pending.size > 0) scheduleFlush();
+  }
+
+  function queueUnits(units) {
+    for (const unit of units) {
+      if (unit.queued || unit.done) continue;
+      unit.queued = true;
+      pending.add(unit);
+    }
+  }
+
+  function queueAhead(visibleIndex) {
+    let startIndex = visibleIndex;
+    if (prefetchedTargetIndexes.has(visibleIndex)) {
+      let runEnd = visibleIndex;
+      while (prefetchedTargetIndexes.has(runEnd + 1)) runEnd += 1;
+      if (runEnd - visibleIndex > 2) return;
+      startIndex = runEnd + 1;
+    }
+    let itemCount = 0;
+    let charCount = 0;
+
+    for (let index = startIndex; index < orderedTargets.length; index += 1) {
+      const units = elUnits.get(orderedTargets[index]) || [];
+      const nextItems = units.length;
+      const nextChars = units.reduce((total, unit) => total + unit.text.length, 0);
+      if (itemCount > 0 && (itemCount + nextItems > MAX_ITEMS || charCount + nextChars > MAX_CHARS)) break;
+      queueUnits(units);
+      prefetchedTargetIndexes.add(index);
+      itemCount += nextItems;
+      charCount += nextChars;
+    }
   }
 
   function scheduleFlush() {
@@ -430,6 +593,9 @@
       if (retryUnits.length > 0) {
         retryUnits.forEach((u) => { u.retryCount += 1; });
         toast('翻譯暫時失敗，將自動重試一次：' + (res ? res.error : '未知錯誤'));
+        const retryDelay = Number.isFinite(res?.retryAfterMs)
+          ? Math.max(RETRY_DELAY, res.retryAfterMs)
+          : RETRY_DELAY;
         setTimeout(() => {
           if (!active || currentRun !== runId) return;
           retryUnits.forEach((u) => {
@@ -438,7 +604,7 @@
             pending.add(u);
           });
           scheduleFlush();
-        }, RETRY_DELAY);
+        }, retryDelay);
       } else {
         toast('翻譯失敗：' + (res ? res.error : '未知錯誤'));
       }

@@ -15,8 +15,10 @@ Gemini Web Translator 是一個 Chrome 擴充功能。它會找出網頁中的�
 ## Features
 
 - 保留原文，將臺灣用語的繁體中文譯文放在段落下方。
-- 將滑鼠移到譯文短句上，以低調的藍色底線標出對應原文；點擊即可固定對照。
+- 將滑鼠移到譯文短句上，以淡藍灰底色標出對應原文；點擊即可固定對照。
+- 保留原文中的超連結，翻譯後的連結文字仍可直接點擊。
 - 只翻譯接近畫面的內容，避免一次送出整篇長文章。
+- 預取後方一整批內容並快取譯文，減少捲動、重新整理與重複閱讀造成的 API 請求。
 - 支援專有名詞保留與固定譯法，翻譯規則可直接在選項頁設定。
 - 使用自己的 Gemini API key，網頁內容不會經過額外的中間伺服器。
 
@@ -67,9 +69,15 @@ Chrome 內建頁面、Chrome Web Store 和其他瀏覽器保護頁面不允許�
 
 啟動翻譯時，content script 會掃描目前頁面，略過不可見、可編輯、程式碼、純符號及中文比例很高的內容。符合條件的段落會交給 `IntersectionObserver`，只有接近畫面的內容才會進入翻譯佇列。
 
-段落會依句子切成可配對的短句，但仍以批次送出；每個批次最多包含 20 個短句或 3,000 個字元。service worker 會套用術語保護與臺灣繁中翻譯指令，呼叫 Gemini API，然後驗證回傳的 JSON、資料型別及譯文數量。驗證通過後，content script 才會把譯文插入原文下方。滑鼠高亮只在瀏覽器內處理，不會產生額外的 API 請求。
+段落會依句子切成可配對的短句，但仍以批次送出；每個批次最多包含 60 個短句或 6,000 個字元。service worker 會套用術語保護與臺灣繁中翻譯指令，呼叫 Gemini API，然後驗證回傳的 JSON、資料型別及譯文數量。驗證通過後，content script 才會把譯文插入原文下方。請求之間會自動節流，遇到 429 時則延長退避時間。滑鼠高亮只在瀏覽器內處理，不會產生額外的 API 請求。
 
 請求支援 30 秒逾時、`Retry-After`、指數退避和有限次數重試。如果使用者在請求期間還原或重新啟動翻譯，舊回應會失效，不會再修改頁面。
+
+## API limits
+
+Gemini 會依專案、模型與使用層級限制每分鐘請求數、每分鐘 Token 和每日請求數。同一個 Google Cloud 專案建立的多把 API key 會共用額度，實際上限請查看 [Google AI Studio Rate Limits](https://aistudio.google.com/rate-limit)。
+
+擴充功能會合併畫面後方的短句、控制請求間隔，並將成功譯文保存在本機。相同的原文、模型、目標語言與術語表設定會直接使用快取，不再呼叫 API。如果每日額度已經用完，仍需等待 Google 重置額度或調整專案的使用層級。
 
 ## Terms
 
@@ -127,6 +135,7 @@ memory = 記憶體
 | 模型 | 預設為 `gemini-flash-lite-latest` |
 | 目標語言 | 預設為 `繁體中文` |
 | 術語表 | 保留原詞或指定固定譯法 |
+| 翻譯快取 | 儲存在本機，可從選項頁手動清除 |
 
 當目標語言包含繁體中文、正體中文、Traditional Chinese 或 `zh-TW` 時，擴充功能會要求 Gemini 使用臺灣常見詞彙和語序，並避免簡體字及中國大陸慣用詞。
 
@@ -134,7 +143,7 @@ memory = 記憶體
 
 ## Privacy
 
-這個專案沒有自建後端。API key、模型、目標語言和術語表都儲存在瀏覽器的 `chrome.storage.local`。
+這個專案沒有自建後端。API key、模型、目標語言、術語表和已完成的翻譯快取都儲存在瀏覽器的 `chrome.storage.local`。快取最多保留約 1,200 個短句或 200 萬字元，可從選項頁隨時清除。
 
 只有在使用者啟動翻譯後，畫面附近需要翻譯的網頁文字才會直接傳送到 Google Gemini API。API key 透過 `x-goog-api-key` header 傳送，不會放在 URL。
 
@@ -149,7 +158,7 @@ npm run check
 npm test
 ```
 
-`npm run check` 會檢查 JavaScript 語法。`npm test` 會測試 API key 傳送方式、暫時性錯誤重試、譯文數量驗證、術語保護，以及還原頁面後忽略舊 API 回應。
+`npm run check` 會檢查 JavaScript 語法。`npm test` 會測試 API key 傳送方式、暫時性錯誤重試、譯文數量驗證、術語保護、本機快取、舊式網頁排版，以及還原頁面後忽略舊 API 回應。
 
 主要檔案：
 
@@ -158,7 +167,7 @@ npm test
 | `background.js` | Gemini API、術語保護、回應驗證與重試 |
 | `content.js` | 掃描段落、安排翻譯、插入譯文與還原頁面 |
 | `popup.html` / `popup.js` | 工具列選單 |
-| `options.html` / `options.js` | API key、模型、目標語言與術語表設定 |
+| `options.html` / `options.js` | API key、模型、目標語言、術語表與快取管理 |
 | `test/` | 回歸測試 |
 
 ## Status

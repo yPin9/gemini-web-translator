@@ -21,6 +21,7 @@ function success(translations) {
 
 function loadBackground(fetchMock, stored = {}) {
   let messageListener;
+  const storage = { apiKey: 'secret-key', ...stored };
   const chrome = {
     runtime: {
       onMessage: { addListener(listener) { messageListener = listener; } },
@@ -29,7 +30,13 @@ function loadBackground(fetchMock, stored = {}) {
     commands: { onCommand: { addListener() {} } },
     tabs: { query: async () => [], sendMessage: async () => {} },
     action: { setBadgeText() {}, setBadgeBackgroundColor() {} },
-    storage: { local: { get: async () => ({ apiKey: 'secret-key', ...stored }) } }
+    storage: {
+      local: {
+        get: async () => ({ ...storage }),
+        set: async (values) => Object.assign(storage, values),
+        remove: async (key) => { delete storage[key]; }
+      }
+    }
   };
 
   vm.runInNewContext(source, {
@@ -136,4 +143,27 @@ test('glossary supports fixed translations and terms containing regex characters
 
   assert.equal(result.ok, true);
   assert.equal(result.translations[0], '軟體 與 C++');
+});
+
+test('completed translations are reused from the local cache', async () => {
+  let calls = 0;
+  const sendMessage = loadBackground(async () => {
+    calls += 1;
+    return success(['快取譯文']);
+  });
+  const message = {
+    type: 'TRANSLATE',
+    texts: ['Cached sentence.'],
+    target: '繁體中文',
+    model: 'gemini-flash-lite-latest'
+  };
+
+  const first = await sendMessage(message);
+  const second = await sendMessage(message);
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(second.cached, true);
+  assert.equal(second.translations[0], '快取譯文');
+  assert.equal(calls, 1);
 });

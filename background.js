@@ -2,11 +2,67 @@
 
 const DEFAULTS = { model: 'gemini-flash-lite-latest', targetLang: '繁體中文' };
 const REQUEST_TIMEOUT_MS = 30000;
-const MAX_TEXTS = 20;
+const MAX_TEXTS = 60;
 const MAX_TEXT_LENGTH = 3000;
 const MAX_GLOSSARY_ENTRIES = 100;
+const MIN_REQUEST_INTERVAL_MS = 6500;
+const CACHE_VERSION = 1;
+const CACHE_MAX_ENTRIES = 1200;
+const CACHE_MAX_CHARS = 2000000;
+
+let lastRequestAt = 0;
+let requestGate = Promise.resolve();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function cacheSignature(text, target, model, glossary) {
+  return JSON.stringify([CACHE_VERSION, model, target, glossary, text]);
+}
+
+function hashSignature(value) {
+  let first = 2166136261;
+  let second = 2246822519;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code, 3266489917);
+  }
+  return `${(first >>> 0).toString(36)}-${(second >>> 0).toString(36)}`;
+}
+
+function readCachedTranslation(cache, signature) {
+  const entry = cache?.entries?.[hashSignature(signature)];
+  if (!entry || entry.signature !== signature || typeof entry.translation !== 'string') return null;
+  entry.usedAt = Date.now();
+  return entry.translation;
+}
+
+function storeCachedTranslations(cache, items) {
+  if (!cache || cache.version !== CACHE_VERSION || !cache.entries) {
+    cache = { version: CACHE_VERSION, entries: {} };
+  }
+  for (const item of items) {
+    cache.entries[hashSignature(item.signature)] = {
+      signature: item.signature,
+      translation: item.translation,
+      usedAt: Date.now()
+    };
+  }
+
+  const newest = Object.entries(cache.entries)
+    .sort((a, b) => (b[1].usedAt || 0) - (a[1].usedAt || 0));
+  const entries = {};
+  let chars = 0;
+  let count = 0;
+  for (const [key, entry] of newest) {
+    const entryChars = entry.signature.length + entry.translation.length;
+    if (count >= CACHE_MAX_ENTRIES || chars + entryChars > CACHE_MAX_CHARS) break;
+    entries[key] = entry;
+    chars += entryChars;
+    count += 1;
+  }
+  return { version: CACHE_VERSION, entries };
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'TRANSLATE') {
@@ -48,7 +104,18 @@ function getRetryDelay(response, attempt) {
     const date = Date.parse(value);
     if (Number.isFinite(date)) return Math.max(0, date - Date.now());
   }
-  return 1500 * (2 ** attempt) + Math.floor(Math.random() * 250);
+  const baseDelay = response.status === 429 ? 15000 : 1500;
+  return baseDelay * (2 ** attempt) + Math.floor(Math.random() * 250);
+}
+
+function waitForRequestSlot() {
+  const slot = requestGate.then(async () => {
+    const remaining = MIN_REQUEST_INTERVAL_MS - (Date.now() - lastRequestAt);
+    if (remaining > 0) await sleep(remaining);
+    lastRequestAt = Date.now();
+  });
+  requestGate = slot.catch(() => {});
+  return slot;
 }
 
 function parseGlossary(value) {
@@ -137,7 +204,8 @@ async function fetchWithRetry(url, opts, tries = 3) {
 }
 
 async function handleTranslate({ texts, target, model }) {
-  const { apiKey, glossary = '' } = await chrome.storage.local.get(['apiKey', 'glossary']);
+  const { apiKey, glossary = '', translationCache: storedCache } =
+    await chrome.storage.local.get(['apiKey', 'glossary', 'translationCache']);
   if (!apiKey) return { ok: false, error: 'NO_KEY' };
 
   if (!Array.isArray(texts) || texts.length === 0 || texts.length > MAX_TEXTS) {
@@ -152,9 +220,21 @@ async function handleTranslate({ texts, target, model }) {
   if (!/^[a-zA-Z0-9._-]+$/.test(m)) {
     return { ok: false, error: '無效的模型名稱', retryable: false };
   }
+
+  let translationCache = storedCache?.version === CACHE_VERSION && storedCache.entries
+    ? storedCache
+    : { version: CACHE_VERSION, entries: {} };
+  const signatures = texts.map((text) => cacheSignature(text, lang, m, glossary));
+  const translations = signatures.map((signature) => readCachedTranslation(translationCache, signature));
+  const missingIndices = translations
+    .map((translation, index) => translation == null ? index : -1)
+    .filter((index) => index >= 0);
+  if (missingIndices.length === 0) return { ok: true, translations, cached: true };
+
+  const apiTexts = missingIndices.map((index) => texts[index]);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`;
   const useTaiwanTraditionalChinese = /繁體|正體|traditional chinese|zh[-_]?tw/i.test(lang);
-  const protectedInput = protectGlossaryTerms(texts, parseGlossary(glossary));
+  const protectedInput = protectGlossaryTerms(apiTexts, parseGlossary(glossary));
 
   const instruction =
     `You are a professional translator. Translate every string in the input JSON array into ${lang}. ` +
@@ -168,6 +248,7 @@ async function handleTranslate({ texts, target, model }) {
     `Rules:\n` +
     `- Return ONLY a JSON array of translated strings.\n` +
     `- Keep exactly the same number of elements and the same order.\n` +
+    `- Markers such as ⟦L0⟧ and ⟦/L0⟧ identify hyperlink text. Preserve every marker exactly once, keep each pair around its translated link text, and never translate the markers themselves.\n` +
     `- Preserve meaning, tone, proper nouns, numbers and inline symbols.\n` +
     `- If a string should not be translated (e.g. code, URLs), return it unchanged.`;
 
@@ -180,12 +261,13 @@ async function handleTranslate({ texts, target, model }) {
       responseSchema: {
         type: 'ARRAY',
         items: { type: 'STRING' },
-        minItems: texts.length,
-        maxItems: texts.length
+        minItems: apiTexts.length,
+        maxItems: apiTexts.length
       }
     }
   };
 
+  await waitForRequestSlot();
   const resp = await fetchWithRetry(url, {
     method: 'POST',
     headers: {
@@ -200,7 +282,8 @@ async function handleTranslate({ texts, target, model }) {
     return {
       ok: false,
       error: `HTTP ${resp.status}: ${t.slice(0, 300)}`,
-      retryable: resp.status === 429 || resp.status === 503 || resp.status >= 500
+      retryable: resp.status === 429 || resp.status === 503 || resp.status >= 500,
+      retryAfterMs: resp.status === 429 ? 60000 : undefined
     };
   }
 
@@ -219,15 +302,29 @@ async function handleTranslate({ texts, target, model }) {
   }
   if (
     !Array.isArray(arr) ||
-    arr.length !== texts.length ||
+    arr.length !== apiTexts.length ||
     arr.some((item) => typeof item !== 'string' || item.length === 0)
   ) {
     return { ok: false, error: '翻譯結果數量或格式不符', retryable: false };
   }
 
-  const translations = restoreGlossaryTerms(arr, protectedInput.replacements);
-  if (!translations) {
+  const newTranslations = restoreGlossaryTerms(arr, protectedInput.replacements);
+  if (!newTranslations) {
     return { ok: false, error: '模型未正確保留術語，將重試', retryable: true };
+  }
+
+  missingIndices.forEach((textIndex, resultIndex) => {
+    translations[textIndex] = newTranslations[resultIndex];
+  });
+  translationCache = storeCachedTranslations(
+    translationCache,
+    missingIndices.map((textIndex) => ({
+      signature: signatures[textIndex],
+      translation: translations[textIndex]
+    }))
+  );
+  if (typeof chrome.storage.local.set === 'function') {
+    await chrome.storage.local.set({ translationCache }).catch(() => {});
   }
 
   return { ok: true, translations };
